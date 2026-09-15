@@ -56,6 +56,15 @@ def clean_response(response):
 
     # Fix duplicate phrases caused by placeholder replacement
     response = response.replace(
+    "your your order number",
+    "your order number"
+    )
+    
+    response = response.replace(
+        "your your tracking number",
+        "your tracking number"
+    )
+    response = response.replace(
         "the order number your order number",
         "your order number"
     )
