@@ -54,6 +54,27 @@ def clean_response(response):
         response
     )
 
+    # Fix duplicate phrases caused by placeholder replacement
+    response = response.replace(
+        "the order number your order number",
+        "your order number"
+    )
+
+    response = response.replace(
+        "order number your order number",
+        "your order number"
+    )
+
+    response = response.replace(
+        "the tracking number your tracking number",
+        "your tracking number"
+    )
+
+    response = response.replace(
+        "tracking number your tracking number",
+        "your tracking number"
+    )
+
     return response
 
 
@@ -84,7 +105,7 @@ for intent, responses in response_data.items():
 app = FastAPI(
     title="Customer Support Chatbot API",
     description="ML based Customer Support Chatbot",
-    version="2.0"
+    version="2.1"
 )
 
 
