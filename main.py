@@ -37,7 +37,7 @@ def clean_response(response):
     response = str(response)
 
     # =====================================================
-    # 1. Replace dataset placeholders
+    # 1. Remove / replace dataset placeholders
     # =====================================================
 
     replacements = {
@@ -51,99 +51,139 @@ def clean_response(response):
         "{{Website URL}}": "our website",
     }
 
+    # -----------------------------------------------------
+    # First handle phrases where placeholder is duplicated
+    # with the same information immediately before it.
+    #
+    # Example:
+    # "with the order number {{Order Number}}"
+    #
+    # becomes:
+    # "with your order number"
+    # -----------------------------------------------------
+
+    response = re.sub(
+        r"\b(?:the\s+)?order\s+number\s*\{\{Order Number\}\}",
+        "your order number",
+        response,
+        flags=re.IGNORECASE
+    )
+
+    response = re.sub(
+        r"\b(?:the\s+)?tracking\s+number\s*\{\{Tracking Number\}\}",
+        "your tracking number",
+        response,
+        flags=re.IGNORECASE
+    )
+
+    response = re.sub(
+        r"\b(?:your\s+)?online\s+account\s*\{\{Online Company Portal Info\}\}",
+        "your online account",
+        response,
+        flags=re.IGNORECASE
+    )
+
+    # -----------------------------------------------------
+    # Replace remaining placeholders
+    # -----------------------------------------------------
+
     for placeholder, replacement in replacements.items():
-
-        # -------------------------------------------------
-        # Placeholder name
-        # -------------------------------------------------
-
-        placeholder_name = (
-            placeholder
-            .replace("{{", "")
-            .replace("}}", "")
-            .strip()
-        )
-
-        # -------------------------------------------------
-        # Convert placeholder name into flexible pattern
-        #
-        # Example:
-        # Order Number
-        # -------------------------------------------------
-
-        placeholder_words = placeholder_name.split()
-
-        if placeholder_words:
-
-            prefix_pattern = r"\s+".join(
-                re.escape(word)
-                for word in placeholder_words
-            )
-
-            # -------------------------------------------------
-            # Detect:
-            #
-            # "order number {{Order Number}}"
-            #
-            # Instead of:
-            #
-            # "order number your order number"
-            #
-            # make it:
-            #
-            # "your order number"
-            # -------------------------------------------------
-
-            response = re.sub(
-                r"\b"
-                + prefix_pattern
-                + r"\s*"
-                + re.escape(placeholder)
-                + r"\b",
-                replacement,
-                response,
-                flags=re.IGNORECASE
-            )
-
-        # -------------------------------------------------
-        # Replace remaining placeholder
-        # -------------------------------------------------
 
         response = response.replace(
             placeholder,
             replacement
         )
 
+        response = response.replace(
+            placeholder.lower(),
+            replacement
+        )
+
     # =====================================================
-    # 2. Remove any unknown {{placeholder}}
+    # 2. Remove unknown placeholders
     # =====================================================
 
     response = re.sub(
         r"\{\{[^{}]+\}\}",
-        "the requested information",
+        "",
         response
     )
 
     # =====================================================
-    # 3. Normalize spaces
+    # 3. Fix broken text caused by placeholder removal
     # =====================================================
 
-    response = re.sub(
-        r"\s+",
-        " ",
-        response
-    ).strip()
+    broken_patterns = [
+
+        # -----------------------------------------------
+        # Order number related
+        # -----------------------------------------------
+
+        (
+            r"\bwith\s+(?:the\s+)?order\s+number\s+your\b",
+            "with your"
+        ),
+
+        (
+            r"\b(?:the\s+)?order\s+number\s+your\b",
+            "your"
+        ),
+
+        (
+            r"\bwith\s+your\s+order\s+number\s+your\b",
+            "with your order number"
+        ),
+
+        (
+            r"\byour\s+order\s+number\s+your\s+order\s+number\b",
+            "your order number"
+        ),
+
+        # -----------------------------------------------
+        # Tracking number
+        # -----------------------------------------------
+
+        (
+            r"\bwith\s+(?:the\s+)?tracking\s+number\s+your\b",
+            "with your"
+        ),
+
+        (
+            r"\b(?:the\s+)?tracking\s+number\s+your\b",
+            "your"
+        ),
+
+        # -----------------------------------------------
+        # Generic possessive duplication
+        # -----------------------------------------------
+
+        (
+            r"\bthe\s+(your|my|our|their)\b",
+            r"\1"
+        ),
+
+        (
+            r"\ba\s+(your|my|our|their)\b",
+            r"\1"
+        ),
+
+        (
+            r"\ban\s+(your|my|our|their)\b",
+            r"\1"
+        ),
+    ]
+
+    for pattern, replacement in broken_patterns:
+
+        response = re.sub(
+            pattern,
+            replacement,
+            response,
+            flags=re.IGNORECASE
+        )
 
     # =====================================================
-    # 4. Remove consecutive duplicate words
-    #
-    # Examples:
-    #
-    # "your your order"
-    # "the the order"
-    # "order order"
-    #
-    # -> clean version
+    # 4. Remove duplicate consecutive words
     # =====================================================
 
     words = response.split()
@@ -166,8 +206,10 @@ def clean_response(response):
                 cleaned_words[-1].lower()
             )
 
-            if normalized_word and \
-               normalized_word == previous_normalized:
+            if (
+                normalized_word
+                and normalized_word == previous_normalized
+            ):
                 continue
 
         cleaned_words.append(word)
@@ -175,20 +217,23 @@ def clean_response(response):
     response = " ".join(cleaned_words)
 
     # =====================================================
-    # 5. Remove duplicated multi-word phrases
+    # 5. Remove duplicate multi-word phrases
     #
-    # Generic:
+    # Generic duplicate detection.
     #
-    # "order status order status"
+    # Example:
+    #
     # "your order number your order number"
-    # "tracking your tracking"
     #
-    # Works for 2-8 word phrases.
+    # becomes:
+    #
+    # "your order number"
     # =====================================================
 
     for phrase_length in range(8, 1, -1):
 
         words = response.split()
+
         cleaned_words = []
         i = 0
 
@@ -228,47 +273,17 @@ def clean_response(response):
                     cleaned_words.extend(first)
 
                     i += phrase_length * 2
+
                     continue
 
             cleaned_words.append(words[i])
+
             i += 1
 
         response = " ".join(cleaned_words)
 
     # =====================================================
-    # 6. Fix duplicate contextual phrases
-    #
-    # Generic structure:
-    #
-    # "the your X"
-    # "a your X"
-    # "an your X"
-    # "the my X"
-    # "a my X"
-    # "the our X"
-    #
-    # -> "your X"
-    #    "my X"
-    #    "our X"
-    # =====================================================
-
-    response = re.sub(
-        r"\b(?:the|a|an)\s+"
-        r"(your|my|our|their)\b",
-        r"\1",
-        response,
-        flags=re.IGNORECASE
-    )
-
-    # =====================================================
-    # 7. Fix repeated possessive structures
-    #
-    # Example:
-    #
-    # "your order number your order"
-    #
-    # Generic detection where the same meaningful phrase
-    # starts again.
+    # 6. Remove repeated nearby phrases
     # =====================================================
 
     words = response.split()
@@ -290,20 +305,18 @@ def clean_response(response):
                 ]
             ]
 
-            next_start = i + 1
-
-            # -------------------------------------------------
-            # Search nearby repeated phrase
-            # -------------------------------------------------
-
             found_duplicate = False
 
+            search_start = i + 1
+
+            search_end = min(
+                i + phrase_length + 4,
+                len(words) - phrase_length + 1
+            )
+
             for j in range(
-                next_start,
-                min(
-                    i + phrase_length + 3,
-                    len(words) - phrase_length + 1
-                )
+                search_start,
+                search_end
             ):
 
                 next_phrase = [
@@ -319,37 +332,69 @@ def clean_response(response):
 
                 if current_phrase == next_phrase:
 
-                    # -------------------------------------------------
-                    # Keep first occurrence and remove second occurrence
-                    # -------------------------------------------------
-
                     del words[
                         j:j + phrase_length
                     ]
 
                     found_duplicate = True
+
                     break
 
             if not found_duplicate:
+
                 i += 1
 
     response = " ".join(words)
 
     # =====================================================
-    # 8. Clean common grammatical duplication
-    #
-    # This is generic and not tied to a particular sentence.
+    # 7. Fix common grammatical duplication again
     # =====================================================
 
     response = re.sub(
-        r"\b(the|a|an)\s+(your|my|our|their)\b",
-        r"\2",
+        r"\b(?:the|a|an)\s+(your|my|our|their)\b",
+        r"\1",
         response,
         flags=re.IGNORECASE
     )
 
     # =====================================================
-    # 9. Remove extra spaces
+    # 8. Fix broken sentence joins
+    #
+    # Example:
+    #
+    # "... order. To do that ..."
+    #
+    # Make sure "To do that" starts a sentence.
+    # =====================================================
+
+    response = re.sub(
+        r"\s+(To do that|To do so|To check this|For this)\b",
+        r". \1",
+        response,
+        flags=re.IGNORECASE
+    )
+
+    # =====================================================
+    # 9. Remove accidental words before sentence starts
+    #
+    # Example:
+    #
+    # "your To do that"
+    #
+    # becomes:
+    #
+    # "your. To do that"
+    # =====================================================
+
+    response = re.sub(
+        r"\b(your|my|our|their)\s+(To do that|To do so)\b",
+        r"\1. \2",
+        response,
+        flags=re.IGNORECASE
+    )
+
+    # =====================================================
+    # 10. Normalize spaces
     # =====================================================
 
     response = re.sub(
@@ -359,7 +404,7 @@ def clean_response(response):
     ).strip()
 
     # =====================================================
-    # 10. Remove spaces before punctuation
+    # 11. Remove spaces before punctuation
     # =====================================================
 
     response = re.sub(
@@ -369,7 +414,7 @@ def clean_response(response):
     )
 
     # =====================================================
-    # 11. Remove repeated punctuation
+    # 12. Remove repeated punctuation
     # =====================================================
 
     response = re.sub(
@@ -379,11 +424,25 @@ def clean_response(response):
     )
 
     # =====================================================
-    # 12. Final capitalization
+    # 13. Fix punctuation followed by lowercase sentence
+    # =====================================================
+
+    response = re.sub(
+        r"([.!?])\s+([a-z])",
+        lambda m: m.group(1) + " " + m.group(2).upper(),
+        response
+    )
+
+    # =====================================================
+    # 14. Final capitalization
     # =====================================================
 
     if response:
-        response = response[0].upper() + response[1:]
+
+        response = (
+            response[0].upper()
+            + response[1:]
+        )
 
     return response.strip()
 
@@ -407,8 +466,13 @@ for intent, responses in response_data.items():
         responses
     )
 
-    response_vectorizers[intent] = response_vectorizer
-    response_matrices[intent] = response_matrix
+    response_vectorizers[intent] = (
+        response_vectorizer
+    )
+
+    response_matrices[intent] = (
+        response_matrix
+    )
 
 
 # =========================================================
@@ -418,7 +482,7 @@ for intent, responses in response_data.items():
 app = FastAPI(
     title="Customer Support Chatbot API",
     description="ML based Customer Support Chatbot",
-    version="3.0"
+    version="3.1"
 )
 
 
@@ -440,6 +504,7 @@ app.add_middleware(
 # =========================================================
 
 class ChatRequest(BaseModel):
+
     message: str
 
 
@@ -467,7 +532,9 @@ def predict(request: ChatRequest):
     # Clean user message
     # -----------------------------------------------------
 
-    message = clean_text(request.message)
+    message = clean_text(
+        request.message
+    )
 
     # -----------------------------------------------------
     # Convert message into TF-IDF
@@ -498,7 +565,9 @@ def predict(request: ChatRequest):
     # -----------------------------------------------------
 
     response_vectorizer = (
-        response_vectorizers[predicted_intent]
+        response_vectorizers[
+            predicted_intent
+        ]
     )
 
     # -----------------------------------------------------
@@ -506,15 +575,19 @@ def predict(request: ChatRequest):
     # -----------------------------------------------------
 
     response_matrix = (
-        response_matrices[predicted_intent]
+        response_matrices[
+            predicted_intent
+        ]
     )
 
     # -----------------------------------------------------
     # Convert user message for similarity
     # -----------------------------------------------------
 
-    user_vector = response_vectorizer.transform(
-        [message]
+    user_vector = (
+        response_vectorizer.transform(
+            [message]
+        )
     )
 
     # -----------------------------------------------------
@@ -549,7 +622,9 @@ def predict(request: ChatRequest):
     # -----------------------------------------------------
 
     similarity_score = float(
-        similarities[best_index]
+        similarities[
+            best_index
+        ]
     )
 
     # -----------------------------------------------------
@@ -557,9 +632,13 @@ def predict(request: ChatRequest):
     # -----------------------------------------------------
 
     return {
+
         "message": request.message,
+
         "intent": predicted_intent,
+
         "response": selected_response,
+
         "similarity_score": round(
             similarity_score,
             4
